@@ -447,8 +447,9 @@ func TestSettings_DefaultLibraryRootFolderID(t *testing.T) {
 	}
 }
 
-// TestSettings_MetadataPrimaryProvider validates that only "openlibrary", "dnb",
-// and "" (empty = default) are accepted, and that unknown values are rejected.
+// TestSettings_MetadataPrimaryProvider validates that known providers are
+// accepted, unknown values are rejected, and "hardcover" requires a
+// configured API token.
 func TestSettings_MetadataPrimaryProvider(t *testing.T) {
 	cases := []struct {
 		value  string
@@ -457,7 +458,7 @@ func TestSettings_MetadataPrimaryProvider(t *testing.T) {
 		{"", true},
 		{"openlibrary", true},
 		{"dnb", true},
-		{"hardcover", false},
+		{"hardcover", false}, // rejected: no token in fixture
 		{"googlebooks", false},
 		{"unknown", false},
 	}
@@ -473,6 +474,22 @@ func TestSettings_MetadataPrimaryProvider(t *testing.T) {
 		if !tc.wantOK && rec.Code != http.StatusBadRequest {
 			t.Errorf("value %q: expected 400, got %d", tc.value, rec.Code)
 		}
+	}
+}
+
+// TestSettings_MetadataPrimaryProviderHardcoverWithToken verifies that
+// "hardcover" is accepted when a Hardcover API token is configured.
+func TestSettings_MetadataPrimaryProviderHardcoverWithToken(t *testing.T) {
+	h, repo, _ := settingsFixture(t)
+	if err := repo.Set(context.Background(), SettingHardcoverAPIToken, "test-token"); err != nil {
+		t.Fatal(err)
+	}
+	body := bytes.NewBufferString(`{"value":"hardcover"}`)
+	req := withKey(httptest.NewRequest(http.MethodPut, "/api/v1/settings/"+SettingMetadataPrimaryProvider, body), SettingMetadataPrimaryProvider)
+	rec := httptest.NewRecorder()
+	h.Set(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("hardcover with token: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

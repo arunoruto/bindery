@@ -42,8 +42,8 @@ const SettingDefaultLibraryRootFolderID = "library.defaultRootFolderId"
 
 // SettingMetadataPrimaryProvider is the KV key that selects the primary
 // metadata provider used for author/book search and lookup. Valid values are
-// "openlibrary" (default) and "dnb". Empty or unset falls back to
-// "openlibrary" for backwards compatibility.
+// "openlibrary" (default), "dnb", and "hardcover" (requires hardcover.api_token).
+// Empty or unset falls back to "openlibrary" for backwards compatibility.
 const SettingMetadataPrimaryProvider = "metadata.primary_provider"
 
 // Drop-folder handoff settings (#941). When import.mode is "external" and a
@@ -198,6 +198,12 @@ func (h *SettingsHandler) Set(w http.ResponseWriter, r *http.Request) {
 	if err := validateSettingValue(key, value); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if key == SettingMetadataPrimaryProvider && value == "hardcover" {
+		if GetHardcoverAPIToken(r.Context(), h.settings) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata.primary_provider 'hardcover' requires a configured Hardcover API token"})
+			return
+		}
 	}
 	if err := h.settings.Set(r.Context(), key, value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -426,10 +432,10 @@ func validateSettingValue(key, value string) error {
 			return nil
 		}
 		switch value {
-		case "openlibrary", "dnb":
+		case "openlibrary", "dnb", "hardcover":
 			return nil
 		default:
-			return fmt.Errorf("metadata.primary_provider %q is not one of: openlibrary, dnb", value)
+			return fmt.Errorf("metadata.primary_provider %q is not one of: openlibrary, dnb, hardcover", value)
 		}
 	case SettingCalibrePluginURL:
 		if value == "" {

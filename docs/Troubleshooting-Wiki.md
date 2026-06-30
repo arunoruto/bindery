@@ -40,7 +40,7 @@ Bindery waited 15 seconds for OpenLibrary (run by the Internet Archive) and got 
 - **VPN or datacenter IP** — the Internet Archive throttles or blocks many shared VPN and hosting IP ranges.
 - **OpenLibrary outage** — the Internet Archive has intermittent downtime.
 
-Bindery's primary metadata provider is OpenLibrary or DNB (the German national library). There is currently no English alternative as the primary provider, so the fix is to make OpenLibrary reachable rather than to switch provider.
+Bindery's primary metadata provider is OpenLibrary (default), DNB (the German national library), or Hardcover (requires an API token configured in Settings → API Keys). If you're hitting timeouts from OpenLibrary, switching to Hardcover as the primary provider may help — it searches hardcover.app's GraphQL API instead. Choose your provider in `Settings → General` under "Primary metadata provider".
 
 **Fixes:**
 
@@ -49,7 +49,7 @@ Bindery's primary metadata provider is OpenLibrary or DNB (the German national l
 
 ## A book is on hardcover.app but doesn't show up in Add Book / Add Author search
 
-The provider dropdown in `Settings → General` only offers **OpenLibrary** or **DNB** for the *primary* provider. Hardcover cannot be set as the primary, and it does not need to be: it always runs as a **search enricher**. Add Book and Add Author fan the query out to the primary provider **plus** Hardcover (and Google Books, if an API key is set), then merge in any titles the primary didn't return. Books that only exist on hardcover.app are exactly what that path is meant to surface.
+The provider dropdown in `Settings → General` offers **OpenLibrary** (default), **DNB**, or **Hardcover** (requires an API token) for the primary provider. If you want hardcover.app results to drive the catalogue directly rather than supplementing it, select Hardcover as the primary provider. When not set as primary, Hardcover always runs as a **search enricher** — Add Book and Add Author fan the query out to the primary provider **plus** Hardcover (and Google Books, if an API key is set), then merge in any titles the primary didn't return. Books that only exist on hardcover.app are exactly what that path is meant to surface.
 
 The catch is that **Hardcover's GraphQL API requires an API token for every query, including search** — an unauthenticated request returns `{"error":"Unable to verify token"}`. Bindery skips a provider that errors rather than failing the whole search, so without a token Hardcover contributes nothing silently and you only see OpenLibrary / DNB results.
 

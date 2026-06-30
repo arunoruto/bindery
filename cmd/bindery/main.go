@@ -239,13 +239,28 @@ func main() {
 
 	// Determine primary provider from settings (default: openlibrary).
 	// When metadata.primary_provider = "dnb", DNB is promoted to primary and
-	// OpenLibrary is added as an enricher instead. This is the recommended
-	// choice for German/Austrian/Swiss catalogues where OpenLibrary coverage
-	// is too thin for German-language books.
+	// OpenLibrary is added as an enricher instead. When set to "hardcover",
+	// the Hardcover GraphQL API becomes the primary source and both OL/DNB
+	// serve as enrichers; this requires a configured hardcover.api_token.
 	var primaryProvider metadata.Provider = olClient
-	if s, _ := settingsRepo.Get(context.Background(), api.SettingMetadataPrimaryProvider); s != nil && s.Value == "dnb" {
-		primaryProvider = dnbClient
-		slog.Info("metadata primary provider: dnb")
+	hcClient := hardcover.New().WithTokenSource(func(ctx context.Context) string {
+		return api.GetHardcoverAPIToken(ctx, settingsRepo)
+	})
+	if s, _ := settingsRepo.Get(context.Background(), api.SettingMetadataPrimaryProvider); s != nil {
+		switch s.Value {
+		case "dnb":
+			primaryProvider = dnbClient
+			slog.Info("metadata primary provider: dnb")
+		case "hardcover":
+			if api.GetHardcoverAPIToken(context.Background(), settingsRepo) == "" {
+				slog.Warn("hardcover primary provider configured but no API token set, falling back to openlibrary")
+			} else {
+				primaryProvider = hcClient
+				slog.Info("metadata primary provider: hardcover")
+			}
+		default:
+			slog.Info("metadata primary provider: openlibrary")
+		}
 	} else {
 		slog.Info("metadata primary provider: openlibrary")
 	}
@@ -255,20 +270,20 @@ func main() {
 		enrichers = append(enrichers, googlebooks.New(apiKey))
 		slog.Info("google books enrichment enabled")
 	}
-	hcClient := hardcover.New().WithTokenSource(func(ctx context.Context) string {
-		return api.GetHardcoverAPIToken(ctx, settingsRepo)
-	})
-	enrichers = append(enrichers, hcClient)
-	slog.Info("hardcover enrichment enabled")
 
-	// Add the non-primary provider as enricher so metadata is always
+	// Add the non-primary providers as enrichers so metadata is always
 	// cross-checked regardless of which provider is primary.
-	if primaryProvider == olClient {
-		enrichers = append(enrichers, dnbClient)
-		slog.Info("dnb enrichment enabled")
-	} else {
-		enrichers = append(enrichers, olClient)
-		slog.Info("openlibrary enrichment enabled")
+	switch {
+	case primaryProvider == olClient:
+		enrichers = append(enrichers, dnbClient, hcClient)
+		slog.Info("dnb + hardcover enrichment enabled")
+	case primaryProvider == dnbClient:
+		enrichers = append(enrichers, olClient, hcClient)
+		slog.Info("openlibrary + hardcover enrichment enabled")
+	default:
+		// Hardcover is primary; both OL and DNB are enrichers.
+		enrichers = append(enrichers, olClient, dnbClient)
+		slog.Info("openlibrary + dnb enrichment enabled")
 	}
 
 	metaAgg := metadata.NewAggregator(primaryProvider, enrichers...)

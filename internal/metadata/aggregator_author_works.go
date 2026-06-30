@@ -139,7 +139,17 @@ func (a *Aggregator) primaryAuthorWorks(ctx context.Context, authorForeignID str
 		return nil, nil
 	}
 	if wp, ok := provider.(worksProvider); ok {
-		return wp.GetAuthorWorks(ctx, authorForeignID)
+		books, err := wp.GetAuthorWorks(ctx, authorForeignID)
+		if errors.Is(err, ErrProviderNotConfigured) {
+			// The primary provider (e.g. Hardcover) had its API token removed
+			// at runtime. Degrade to an empty primary list with a warning
+			// rather than hard-failing the author refresh — any enricher that
+			// can supplement by name still runs for GetAuthorWorksForAuthor.
+			slog.Warn("primary provider not configured for author works; returning empty primary list",
+				"provider", providerName(provider), "author", authorForeignID)
+			return nil, nil
+		}
+		return books, err
 	}
 	if !sameProvider(provider, a.primary) {
 		return nil, nil

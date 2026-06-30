@@ -167,6 +167,22 @@ func (c *Client) SearchBooks(ctx context.Context, query string) ([]models.Book, 
 	return books, nil
 }
 
+// GetAuthorWorks fetches canonical Hardcover books for an author by their
+// foreign ID (slug). It satisfies the metadata.worksProvider interface, so it
+// is the path used when Hardcover is the primary metadata provider. It
+// requires a configured API token; an unconfigured client returns
+// ErrProviderNotConfigured.
+func (c *Client) GetAuthorWorks(ctx context.Context, authorForeignID string) ([]models.Book, error) {
+	slug := strings.TrimSpace(strings.TrimPrefix(authorForeignID, idPrefix))
+	if slug == "" {
+		return nil, fmt.Errorf("hardcover get author works: invalid foreign id %q", authorForeignID)
+	}
+	if c.authorizationToken(ctx) == "" {
+		return nil, metadata.ErrProviderNotConfigured
+	}
+	return c.fetchAuthorWorks(ctx, "slug", "slug", slug)
+}
+
 // GetAuthorWorksByName fetches canonical Hardcover books for an author in
 // page-sized batches. It requires a configured API token because Hardcover's
 // schema endpoints are token-backed in production; an unconfigured client
@@ -179,18 +195,27 @@ func (c *Client) GetAuthorWorksByName(ctx context.Context, authorName string) ([
 	if c.authorizationToken(ctx) == "" {
 		return nil, metadata.ErrProviderNotConfigured
 	}
+	return c.fetchAuthorWorks(ctx, "name", "author", authorName)
+}
 
-	// NB: do NOT select `language` here. It is an *edition* field; the `books`
-	// type has no `language`, so requesting it makes Hardcover reject the whole
-	// query ("field 'language' not found in type: 'books'", validation-failed)
-	// and the entire author-works supplement fails (#1036-adjacent report). A
-	// book's language can only be derived by traversing to a default edition;
-	// until that's added, supplemental books carry no language.
-	gql := `query GetAuthorWorksByName($author: String!, $limit: Int!, $offset: Int!) {
+// fetchAuthorWorks runs the paginated author-works query, filtering books by
+// the given author predicate (filterField is the Hardcover author column,
+// "slug" or "name"; varName is the GraphQL variable bound to value). Both
+// GetAuthorWorks (by slug) and GetAuthorWorksByName (by name) delegate here so
+// the field list and the language caveat below live in exactly one place.
+//
+// NB: do NOT select `language` here. It is an *edition* field; the `books`
+// type has no `language`, so requesting it makes Hardcover reject the whole
+// query ("field 'language' not found in type: 'books'", validation-failed)
+// and the entire author-works query fails (#1036-adjacent report). A book's
+// language can only be derived by traversing to a default edition; until
+// that's added, these books carry no language.
+func (c *Client) fetchAuthorWorks(ctx context.Context, filterField, varName, value string) ([]models.Book, error) {
+	gql := `query AuthorWorks($` + varName + `: String!, $limit: Int!, $offset: Int!) {
 		books(
 			where: {
 				canonical_id: {_is_null: true},
-				contributions: {author: {name: {_eq: $author}}}
+				contributions: {author: {` + filterField + `: {_eq: $` + varName + `}}}
 			},
 			limit: $limit,
 			offset: $offset,
@@ -224,7 +249,7 @@ func (c *Client) GetAuthorWorksByName(ctx context.Context, authorName string) ([
 			} `json:"data"`
 		}
 		if err := c.query(ctx, gql, map[string]any{
-			"author": authorName,
+			varName:  value,
 			"limit":  authorWorksPageSize,
 			"offset": offset,
 		}, &resp); err != nil {

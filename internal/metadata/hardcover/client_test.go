@@ -756,6 +756,114 @@ func TestGetAuthorWorksByName_NoTokenSkipsRequest(t *testing.T) {
 	}
 }
 
+// TestGetAuthorWorks_BySlug exercises the worksProvider path used when
+// Hardcover is the primary metadata provider: it strips the hc: prefix,
+// filters by author slug, and maps books the same way the by-name supplement
+// does. It also re-asserts the books.language / search-only-field traps so the
+// shared query can't regress through this entry point.
+func TestGetAuthorWorks_BySlug(t *testing.T) {
+	var gotVars map[string]any
+	var gotAuth string
+	c := newMockClient(func(r *http.Request) (*http.Response, error) {
+		gotAuth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		var req gqlRequest
+		_ = json.Unmarshal(body, &req)
+		if !strings.Contains(req.Query, "slug: {_eq: $slug}") {
+			t.Fatalf("query must filter author by slug: %s", req.Query)
+		}
+		for _, field := range []string{"isbns", "has_audiobook", "has_ebook", "featured_series"} {
+			if strings.Contains(req.Query, field) {
+				t.Fatalf("query requested search-only Hardcover field %q: %s", field, req.Query)
+			}
+		}
+		for _, field := range []string{"default_audio_edition_id", "default_ebook_edition_id", "compilation"} {
+			if !strings.Contains(req.Query, field) {
+				t.Fatalf("query did not request Hardcover field %q: %s", field, req.Query)
+			}
+		}
+		// Regression: `language` is an edition field, not a `books` field;
+		// requesting it makes Hardcover reject the whole query.
+		if strings.Contains(req.Query, "language") {
+			t.Fatalf("author-works query must not request the invalid books.language field: %s", req.Query)
+		}
+		gotVars = req.Variables
+		data := map[string]interface{}{
+			"books": []map[string]interface{}{
+				{
+					"id":            10,
+					"title":         "Dune",
+					"slug":          "dune",
+					"description":   "A desert planet.",
+					"image":         map[string]interface{}{"url": "https://img/dune.jpg"},
+					"release_year":  1965,
+					"ratings_count": 1000,
+					"rating":        4.5,
+					"users_count":   2000,
+					"compilation":   false,
+					"contributions": []map[string]interface{}{
+						{"author": map[string]interface{}{"id": 1, "name": "Frank Herbert", "slug": "frank-herbert"}},
+					},
+				},
+			},
+		}
+		return gqlResponse(t, http.StatusOK, data), nil
+	}).WithToken("hc-secret")
+
+	books, err := c.GetAuthorWorks(context.Background(), "hc:frank-herbert")
+	if err != nil {
+		t.Fatalf("GetAuthorWorks: %v", err)
+	}
+	if gotAuth != "Bearer hc-secret" {
+		t.Fatalf("Authorization = %q, want Bearer token", gotAuth)
+	}
+	if gotVars["slug"] != "frank-herbert" {
+		t.Fatalf("slug variable = %v, want frank-herbert", gotVars["slug"])
+	}
+	if len(books) != 1 {
+		t.Fatalf("books len = %d, want 1", len(books))
+	}
+	if book := books[0]; book.ForeignID != "hc:dune" || book.Title != "Dune" || book.ImageURL == "" {
+		t.Fatalf("unexpected book: %+v", book)
+	}
+}
+
+func TestGetAuthorWorks_NoTokenSkipsRequest(t *testing.T) {
+	called := false
+	c := newMockClient(func(r *http.Request) (*http.Response, error) {
+		called = true
+		return gqlResponse(t, http.StatusOK, map[string]interface{}{}), nil
+	})
+
+	books, err := c.GetAuthorWorks(context.Background(), "hc:frank-herbert")
+	if !errors.Is(err, metadata.ErrProviderNotConfigured) {
+		t.Fatalf("GetAuthorWorks error = %v, want ErrProviderNotConfigured", err)
+	}
+	if called {
+		t.Fatal("expected no HTTP request without token")
+	}
+	if books != nil {
+		t.Fatalf("books = %+v, want nil", books)
+	}
+}
+
+// TestGetAuthorWorks_InvalidForeignID rejects an empty slug before checking the
+// token so the caller gets an actionable error rather than a silent empty list.
+func TestGetAuthorWorks_InvalidForeignID(t *testing.T) {
+	called := false
+	c := newMockClient(func(r *http.Request) (*http.Response, error) {
+		called = true
+		return gqlResponse(t, http.StatusOK, map[string]interface{}{}), nil
+	}).WithToken("hc-secret")
+
+	if _, err := c.GetAuthorWorks(context.Background(), "hc:"); err == nil {
+		t.Fatal("GetAuthorWorks(\"hc:\") error = nil, want invalid foreign id error")
+	}
+	if called {
+		t.Fatal("expected no HTTP request for an empty slug")
+	}
+}
+
 func TestGetAuthor_Found(t *testing.T) {
 	c := newMockClient(func(r *http.Request) (*http.Response, error) {
 		data := map[string]interface{}{

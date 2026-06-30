@@ -41,6 +41,7 @@ export default function MetadataTab() {
   const [editing, setEditing] = useState<MetadataProfile | null>(null)
   const [creating, setCreating] = useState(false)
   const [settings, setSettings] = useState<Record<string, string>>({})
+  const [hardcoverTokenConfigured, setHardcoverTokenConfigured] = useState(false)
 
   const reload = () => api.listMetadataProfiles().then(setProfiles).catch(console.error)
 
@@ -51,6 +52,7 @@ export default function MetadataTab() {
       list.forEach(s => { map[s.key] = s.value })
       setSettings(map)
     }).catch(console.error)
+    api.status().then(s => setHardcoverTokenConfigured(s.hardcoverTokenConfigured)).catch(console.error)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -79,7 +81,15 @@ export default function MetadataTab() {
           >
             <option value="openlibrary">{t('settings.general.metadataProviderOpenlibrary', 'OpenLibrary (default)')}</option>
             <option value="dnb">{t('settings.general.metadataProviderDnb', 'DNB — Deutsche Nationalbibliothek (German/DACH)')}</option>
+            {(hardcoverTokenConfigured || (settings['metadata.primary_provider'] ?? 'openlibrary') === 'hardcover') && (
+              <option value="hardcover">{t('settings.general.metadataProviderHardcover', 'Hardcover')}</option>
+            )}
           </select>
+          {!hardcoverTokenConfigured && (settings['metadata.primary_provider'] ?? 'openlibrary') === 'hardcover' && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              {t('settings.general.hardcoverTokenMissingWarning', 'Hardcover requires an API token — set one in Settings → API Keys. Falling back to OpenLibrary until then.')}
+            </p>
+          )}
         </div>
 
         {/* Author defaults */}

@@ -80,6 +80,28 @@ func TestAggregator_GetAuthorWorks_Fallback(t *testing.T) {
 	}
 }
 
+// TestAggregator_GetAuthorWorks_PrimaryNotConfigured verifies that when the
+// primary worksProvider (e.g. Hardcover) reports ErrProviderNotConfigured —
+// its API token was removed at runtime — the aggregator degrades to an empty
+// list instead of propagating the error and hard-failing the author refresh.
+func TestAggregator_GetAuthorWorks_PrimaryNotConfigured(t *testing.T) {
+	primary := &mockWorksProvider{
+		mockProvider: mockProvider{name: "hardcover", authorWorksErr: ErrProviderNotConfigured},
+	}
+	agg := &Aggregator{
+		primary: primary,
+		cache:   newTTLCache(time.Minute),
+	}
+
+	got, err := agg.GetAuthorWorks(context.Background(), "hc:frank-herbert")
+	if err != nil {
+		t.Fatalf("GetAuthorWorks: want nil error on unconfigured primary, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty works on unconfigured primary, got %d", len(got))
+	}
+}
+
 func TestAggregator_GetAuthorWorks_Cached(t *testing.T) {
 	books := []models.Book{{Title: "Ender's Game"}}
 	primary := &mockWorksProvider{
