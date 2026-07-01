@@ -65,6 +65,18 @@ func TestNormalizeTitleForDedup(t *testing.T) {
 			want: "carl's doomsday scenario",
 		},
 		{
+			// A "Vol." marker in the subtitle means the volume number lives
+			// there; keep the subtitle so distinct volumes don't collapse.
+			name: "volume subtitle preserved",
+			in:   "Mushoku Tensei: Jobless Reincarnation, Vol. 1",
+			want: "mushoku tensei: jobless reincarnation, vol. 1",
+		},
+		{
+			name: "hash volume marker preserved",
+			in:   "The Sandman: Preludes & Nocturnes #1",
+			want: "the sandman: preludes & nocturnes #1",
+		},
+		{
 			name: "title without colon unchanged",
 			in:   "Carl's Doomsday Scenario",
 			want: "carl's doomsday scenario",
@@ -82,6 +94,27 @@ func TestNormalizeTitleForDedup(t *testing.T) {
 				t.Errorf("NormalizeTitleForDedup(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestNormalizeTitleForDedup_SeriesVolumesStayDistinct guards the fix for the
+// series-collapse bug: works that share a main title but differ by an explicit
+// "Vol." number (common for light novels and manga, where a metadata provider
+// like Hardcover lists every volume as its own canonical book) must NOT reduce
+// to a single dedup key — otherwise author-works import merges the whole series
+// into one row. Sibling sub-series at the same volume number must also differ.
+func TestNormalizeTitleForDedup_SeriesVolumesStayDistinct(t *testing.T) {
+	titles := []string{
+		"Mushoku Tensei: Jobless Reincarnation, Vol. 1",
+		"Mushoku Tensei: Jobless Reincarnation, Vol. 2",
+		"Mushoku Tensei: Roxy Gets Serious, Vol. 1",
+	}
+	keys := make(map[string]struct{})
+	for _, ti := range titles {
+		keys[NormalizeTitleForDedup(ti)] = struct{}{}
+	}
+	if len(keys) != len(titles) {
+		t.Errorf("expected %d distinct dedup keys, got %d: %v", len(titles), len(keys), keys)
 	}
 }
 

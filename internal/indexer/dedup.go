@@ -74,13 +74,37 @@ func CanonicalDedupKey(title string) string {
 	return NormalizeTitleForDedup(StripBracketSuffixes(strings.TrimSpace(title)))
 }
 
+// volumeMarkerRe matches an explicit numbered *volume* indicator in a subtitle:
+// "Vol. 3", "Volume 3", "Band 2" / "Bd. 2" (German), or "#5". Its presence
+// means the subtitle carries the volume number of a numbered series whose main
+// title is shared across volumes ("Mushoku Tensei: Jobless Reincarnation,
+// Vol. 1" vs "…, Vol. 2"), so the subtitle must be kept to tell them apart.
+//
+// "Book N" and "Part N" are deliberately excluded. In practice those appear as
+// series-position descriptors appended to an already-unique main title
+// ("Carl's Doomsday Scenario: Dungeon Crawler Carl, Book 2"), where the bare
+// main title IS the book and the audiobook/ebook forms should still collapse
+// together (#442). Only "Vol."-style markers reliably signal the shared-title
+// numbered-series shape, so limiting to them fixes the series-collapse without
+// regressing the dual-format subtitle merge.
+var volumeMarkerRe = regexp.MustCompile(`(?i)(\b(?:vol|volume|band|bd)\b\.?\s*#?\s*\d+|#\s*\d+)`)
+
 // stripSubtitle removes a trailing ": subtitle" segment when the colon is
 // followed by whitespace. Collapses editions that vary only in whether the
 // subtitle is present (e.g. audiobook drops it, ebook keeps it). Compact
 // titles like "foo:bar" with no whitespace after the colon are left intact.
+//
+// Exception: when the subtitle carries an explicit numbered volume/part marker
+// (see volumeMarkerRe), the whole title is preserved. Stripping it would key
+// every volume of a numbered series onto the same dedup key — e.g. "Mushoku
+// Tensei: Jobless Reincarnation, Vol. 1" and "…, Vol. 2" both reduce to
+// "mushoku tensei" — merging genuinely distinct books into a single row.
 func stripSubtitle(title string) string {
 	for i := 0; i < len(title)-1; i++ {
 		if title[i] == ':' && (title[i+1] == ' ' || title[i+1] == '\t') {
+			if volumeMarkerRe.MatchString(title[i+1:]) {
+				return title
+			}
 			return strings.TrimSpace(title[:i])
 		}
 	}
